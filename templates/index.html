@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pet OOD Detection System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .card { border: none; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); transition: 0.3s; }
+        .card:hover { transform: translateY(-5px); }
+        .upload-area { border: 2px dashed #cbd5e0; border-radius: 15px; padding: 40px; text-align: center; cursor: pointer; background: white; transition: 0.3s; }
+        .upload-area:hover { border-color: #4e73df; background-color: #f8f9fa; }
+        .preview-img { max-height: 300px; border-radius: 10px; object-fit: contain; }
+        .status-badge { font-size: 1.2rem; padding: 10px 20px; border-radius: 50px; }
+        .loading { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container py-5">
+    <div class="text-center mb-5">
+        <h1 class="fw-bold text-primary"><i class="fas fa-paw"></i> Hệ Thống Nhận Diện OOD</h1>
+        <p class="text-muted">Phát hiện Chó/Mèo (In-Distribution) và Vật thể lạ (Out-of-Distribution) bằng Contrastive Learning</p>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title mb-4">Input Image</h5>
+                    <div class="upload-area" id="drop-area" onclick="document.getElementById('fileElem').click()">
+                        <i class="fas fa-cloud-upload-alt fa-3x text-primary mb-3"></i>
+                        <p class="mb-0">Kéo thả ảnh hoặc click để tải lên</p>
+                        <input type="file" id="fileElem" accept="image/*" style="display:none" onchange="handleFiles(this.files)">
+                    </div>
+                    <div class="mt-4 text-center">
+                        <img id="preview" class="preview-img img-fluid d-none" src="" alt="Preview">
+                    </div>
+                    <div class="d-grid gap-2 mt-3">
+                        <button class="btn btn-primary btn-lg" onclick="uploadAndPredict()" id="predictBtn" disabled>
+                            <i class="fas fa-search"></i> Phân Tích Ngay
+                        </button>
+                    </div>
+                    <div class="loading text-center mt-3" id="loading">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <p>Đang xử lý...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-8">
+            <div class="row g-4" id="resultSection" style="opacity: 0.5; pointer-events: none;">
+
+                <div class="col-12">
+                    <div class="card bg-white">
+                        <div class="card-body text-center">
+                            <h6 class="text-uppercase text-muted fw-bold">Kết quả nhận diện</h6>
+                            <div id="finalStatus" class="mt-2">
+                                <span class="badge bg-secondary status-badge">Chờ phân tích...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <h6 class="card-title text-center">Chỉ số OOD (Feature Norm)</h6>
+                            <canvas id="oodChart"></canvas>
+                            <div class="text-center mt-2">
+                                <small class="text-muted">Ngưỡng (Threshold): <span id="thresholdVal">--</span></small>
+                                <br>
+                                <small>Thấp hơn ngưỡng = <b>ID</b> | Cao hơn ngưỡng = <b>OOD</b></small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <h6 class="card-title text-center">Xác suất Dự đoán (Top 5)</h6>
+                            <canvas id="probChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let oodChartInstance = null;
+    let probChartInstance = null;
+
+    function handleFiles(files) {
+        const file = files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const preview = document.getElementById('preview');
+                preview.src = e.target.result;
+                preview.classList.remove('d-none');
+                document.getElementById('predictBtn').disabled = false;
+            }
+            reader.readAsDataURL(file);
+        }
+    }
+
+    async function uploadAndPredict() {
+        const fileInput = document.getElementById('fileElem');
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        // UI Updates
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('predictBtn').disabled = true;
+        document.getElementById('resultSection').style.opacity = '0.5';
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const response = await fetch('/predict', { method: 'POST', body: formData });
+            const data = await response.json();
+
+            if(data.error) {
+                alert(data.error);
+            } else {
+                updateUI(data);
+            }
+        } catch (error) {
+            console.error(error);
+            alert("Có lỗi xảy ra!");
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('predictBtn').disabled = false;
+            document.getElementById('resultSection').style.opacity = '1';
+        }
+    }
+
+    function updateUI(data) {
+        // 1. Cập nhật Status Badge
+        const statusDiv = document.getElementById('finalStatus');
+        const thresholdVal = document.getElementById('thresholdVal');
+        thresholdVal.innerText = data.threshold;
+
+        if (data.is_ood) {
+            statusDiv.innerHTML = `<span class="badge bg-danger status-badge"><i class="fas fa-exclamation-triangle"></i> ${data.result_label}</span>`;
+        } else {
+            statusDiv.innerHTML = `<span class="badge bg-success status-badge"><i class="fas fa-check-circle"></i> ${data.result_label}</span>`;
+        }
+
+        // 2. Vẽ OOD Gauge Chart (Dạng Doughnut bán nguyệt)
+        const ctxOOD = document.getElementById('oodChart').getContext('2d');
+        if (oodChartInstance) oodChartInstance.destroy();
+
+        // Màu sắc: Xanh nếu < Threshold, Đỏ nếu > Threshold
+        const gaugeColor = data.is_ood ? '#e74a3b' : '#1cc88a';
+
+        oodChartInstance = new Chart(ctxOOD, {
+            type: 'doughnut',
+            data: {
+                labels: ['Score', 'Remaining'],
+                datasets: [{
+                    data: [data.ood_score, Math.max(0, data.threshold * 2 - data.ood_score)], // Scale giả lập
+                    backgroundColor: [gaugeColor, '#eaecf4'],
+                    borderWidth: 0,
+                    circumference: 180,
+                    rotation: 270,
+                }]
+            },
+            options: {
+                aspectRatio: 1.5,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { enabled: false }
+                }
+            },
+            plugins: [{
+                id: 'text',
+                beforeDraw: function(chart) {
+                    var width = chart.width, height = chart.height, ctx = chart.ctx;
+                    ctx.restore();
+                    var fontSize = (height / 114).toFixed(2);
+                    ctx.font = "bold " + fontSize + "em sans-serif";
+                    ctx.textBaseline = "middle";
+                    ctx.fillStyle = gaugeColor;
+                    var text = data.ood_score.toFixed(2),
+                        textX = Math.round((width - ctx.measureText(text).width) / 2),
+                        textY = height / 1.3;
+                    ctx.fillText(text, textX, textY);
+                    ctx.save();
+                }
+            }]
+        });
+
+        // 3. Vẽ Class Probability Bar Chart
+        const ctxProb = document.getElementById('probChart').getContext('2d');
+        if (probChartInstance) probChartInstance.destroy();
+
+        probChartInstance = new Chart(ctxProb, {
+            type: 'bar',
+            data: {
+                labels: data.top5_classes,
+                datasets: [{
+                    label: 'Độ tự tin (%)',
+                    data: data.top5_probs,
+                    backgroundColor: '#4e73df',
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                indexAxis: 'y', // Biểu đồ ngang
+                scales: { x: { beginAtZero: true, max: 100 } },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+</script>
+
+</body>
+</html>
