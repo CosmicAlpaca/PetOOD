@@ -6,21 +6,19 @@ from torchvision import models
 from PIL import Image
 from flask import Flask, request, render_template, jsonify
 
-# ================= CẤU HÌNH =================
+
 app = Flask(__name__)
 UPLOAD_FOLDER = 'static/uploads'
 MODEL_PATH = 'model/best_contrastive_model_caltech.pt'
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# --- QUAN TRỌNG: ĐIỀN GIÁ TRỊ NGƯỠNG TỪ LOG TRAIN CỦA BẠN VÀO ĐÂY ---
-# Ví dụ: Nếu log ghi "Ngưỡng OOD... là: 2.1543" thì điền 2.1543
+
 OOD_THRESHOLD = 1.3049
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
-# ================= ĐỊNH NGHĨA LẠI MODEL (BẮT BUỘC) =================
-# Phải giống hệt code training để load được weights
+
 class ProjectionHead(nn.Module):
     def __init__(self, in_features, projection_dim=128):
         super().__init__()
@@ -37,7 +35,7 @@ class ProjectionHead(nn.Module):
 class OODResNet18(nn.Module):
     def __init__(self, num_classes=37, projection_dim=128):
         super().__init__()
-        self.backbone = models.resnet18(weights=None)  # Không cần load pretrain lại
+        self.backbone = models.resnet18(weights=None)  
         self.backbone_dim = self.backbone.fc.in_features
         self.backbone.fc = nn.Identity()
         self.projection_head = ProjectionHead(self.backbone_dim, projection_dim)
@@ -52,9 +50,9 @@ class OODResNet18(nn.Module):
         return logits
 
 
-# ================= LOAD MODEL & CLASSES =================
+
 print("Dang tai model...")
-# Danh sách 37 lớp Oxford-IIIT Pet (cần đúng thứ tự alphabet như ImageFolder)
+
 CLASS_NAMES = [
     'Abyssinian', 'American Bulldog', 'American Pit Bull Terrier', 'Basset Hound',
     'Beagle', 'Bengal', 'Birman', 'Bombay', 'Boxer', 'British Shorthair',
@@ -79,7 +77,7 @@ except Exception as e:
 
 # Transform cho ảnh đầu vào (Giống hệt phần Val/Test)
 transform = transforms.Compose([
-    transforms.Grayscale(num_output_channels=3),  # Quan trọng: Giống lúc train
+    transforms.Grayscale(num_output_channels=3), 
     transforms.Resize(256),
     transforms.CenterCrop(224),
     transforms.ToTensor(),
