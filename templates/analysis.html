@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Batch Analysis - Pet OOD</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #f8f9fc; }
+        .upload-area { border: 2px dashed #4e73df; background: #fff; padding: 30px; border-radius: 10px; cursor: pointer; text-align: center; transition: 0.2s; }
+        .upload-area:hover { background: #f1f5ff; }
+        .result-row { cursor: pointer; transition: 0.2s; }
+        .result-row:hover { background-color: #dbeafe; border-left: 4px solid #4e73df; }
+        .ood-danger { color: #e74a3b; font-weight: bold; }
+        .id-success { color: #1cc88a; font-weight: bold; }
+        #detailSection { display: none; position: sticky; top: 20px; }
+        /* Style cho ảnh preview */
+        .detail-img-container {
+            width: 100%;
+            height: 250px;
+            background-color: #eaecf4;
+            border-radius: 10px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 15px;
+            border: 1px solid #d1d3e2;
+        }
+        .detail-img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+    </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark bg-primary mb-4">
+    <div class="container">
+        <a class="navbar-brand" href="/"><i class="fas fa-paw"></i> Pet OOD System</a>
+        <span class="navbar-text text-white fw-bold">Batch Analysis Dashboard</span>
+    </div>
+</nav>
+
+<div class="container">
+    <div class="row">
+        <div class="col-lg-7">
+            <div class="card shadow mb-4">
+                <div class="card-body">
+                    <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+                        <i class="fas fa-folder-open fa-3x text-primary mb-3"></i>
+                        <h5>Tải lên Ảnh hoặc File ZIP</h5>
+                        <p class="text-muted small mb-0">Hỗ trợ JPG, PNG hoặc file nén .ZIP chứa nhiều ảnh.</p>
+                        <input type="file" id="fileInput" name="files" multiple accept="image/*,.zip" style="display:none" onchange="handleBatchUpload()">
+                    </div>
+                </div>
+            </div>
+
+            <div id="loading" class="text-center my-4" style="display:none;">
+                <div class="spinner-border text-primary" role="status"></div>
+                <p class="mt-2 text-primary fw-bold">Đang giải nén và phân tích...</p>
+            </div>
+
+            <div class="card shadow" id="tableCard" style="display:none;">
+                <div class="card-header py-3 d-flex justify-content-between align-items-center">
+                    <h6 class="m-0 font-weight-bold text-primary">Danh sách kết quả</h6>
+                    <span class="badge bg-secondary" id="totalCount">0 ảnh</span>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+                        <table class="table table-hover mb-0 align-middle">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th>File</th>
+                                    <th>Score</th>
+                                    <th>Kết luận</th>
+                                    <th>Xem</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div id="detailSection">
+                <div class="card shadow mb-4">
+                    <div class="card-header py-3 bg-white d-flex justify-content-between align-items-center">
+                        <h6 class="m-0 font-weight-bold text-primary" id="detailFilename">Chi tiết ảnh</h6>
+                        <span id="detailBadge"></span>
+                    </div>
+                    <div class="card-body">
+                        <div class="detail-img-container">
+                            <img id="detailImg" class="detail-img" src="" alt="Analyzed Image">
+                        </div>
+
+                        <div class="mb-4 text-center">
+                            <h6 class="small fw-bold text-muted">CHỈ SỐ FEATURE NORM</h6>
+                            <div style="height: 150px; position: relative;">
+                                <canvas id="oodChart"></canvas>
+                            </div>
+                            <small class="text-muted">Ngưỡng: <span id="threshVal"></span></small>
+                        </div>
+
+                        <hr>
+
+                        <div>
+                            <h6 class="small fw-bold text-muted mb-2">DỰ ĐOÁN LOÀI (TOP 5)</h6>
+                            <canvas id="probChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="placeholderDetail" class="text-center text-muted mt-5 pt-5">
+                <i class="far fa-eye fa-5x mb-3 text-gray-300"></i>
+                <p class="lead">Chọn một ảnh từ danh sách bên trái<br>để xem hình ảnh và biểu đồ chi tiết.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentResults = [];
+    let oodChart = null;
+    let probChart = null;
+
+    async function handleBatchUpload() {
+        const input = document.getElementById('fileInput');
+        if (input.files.length === 0) return;
+
+        const formData = new FormData();
+        for (let i = 0; i < input.files.length; i++) {
+            formData.append('files', input.files[i]);
+        }
+
+        // Reset UI
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('tableCard').style.display = 'none';
+        document.getElementById('detailSection').style.display = 'none';
+        document.getElementById('placeholderDetail').style.display = 'block';
+
+        try {
+            const res = await fetch('/api/predict', { method: 'POST', body: formData });
+            const data = await res.json();
+
+            if (data.results) {
+                currentResults = data.results;
+                renderTable(data.results);
+            }
+        } catch (e) {
+            alert("Lỗi kết nối API: " + e);
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+            // Reset input để chọn lại file cũ được
+            input.value = '';
+        }
+    }
+
+    function renderTable(results) {
+        const tbody = document.getElementById('resultTableBody');
+        tbody.innerHTML = '';
+        document.getElementById('tableCard').style.display = 'block';
+        document.getElementById('totalCount').innerText = results.length + " file";
+
+        results.forEach((item, index) => {
+            if(item.error) return; // Bỏ qua lỗi
+
+            const tr = document.createElement('tr');
+            tr.className = 'result-row';
+            tr.onclick = () => showDetail(index);
+
+            const statusClass = item.is_ood ? 'ood-danger' : 'id-success';
+            const icon = item.is_ood ? '<i class="fas fa-exclamation-triangle"></i>' : '<i class="fas fa-check-circle"></i>';
+
+            tr.innerHTML = `
+                <td class="small fw-bold text-truncate" style="max-width: 150px;">${item.filename}</td>
+                <td>${item.ood_score}</td>
+                <td class="${statusClass}">${icon} ${item.is_ood ? 'OOD' : 'ID'}</td>
+                <td><i class="far fa-eye text-primary"></i></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function showDetail(index) {
+        const data = currentResults[index];
+        document.getElementById('placeholderDetail').style.display = 'none';
+        document.getElementById('detailSection').style.display = 'block';
+
+        document.getElementById('detailFilename').innerText = data.filename;
+        document.getElementById('threshVal').innerText = data.threshold;
+
+        // Cập nhật ảnh (Source Base64 từ API)
+        document.getElementById('detailImg').src = data.image_data;
+
+        // Badge Status
+        const badgeSpan = document.getElementById('detailBadge');
+        if(data.is_ood) {
+            badgeSpan.innerHTML = `<span class="badge bg-danger">OOD</span>`;
+        } else {
+            badgeSpan.innerHTML = `<span class="badge bg-success">ID</span>`;
+        }
+
+        // Vẽ biểu đồ
+        renderOODChart(data);
+        renderProbChart(data);
+    }
+
+    function renderOODChart(data) {
+        const ctx = document.getElementById('oodChart').getContext('2d');
+        if (oodChart) oodChart.destroy();
+
+        const color = data.is_ood ? '#e74a3b' : '#1cc88a';
+        oodChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Score', 'Safe Zone'],
+                datasets: [{
+                    data: [data.ood_score, Math.max(0, data.threshold * 2 - data.ood_score)],
+                    backgroundColor: [color, '#eaecf4'],
+                    borderWidth: 0,
+                    circumference: 180,
+                    rotation: 270
+                }]
+            },
+            options: {
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { enabled: false } }
+            },
+            plugins: [{
+                id: 'text',
+                beforeDraw: function(chart) {
+                    var width = chart.width, height = chart.height, ctx = chart.ctx;
+                    ctx.restore();
+                    var fontSize = (height / 100).toFixed(2);
+                    ctx.font = "bold " + fontSize + "em sans-serif";
+                    ctx.fillStyle = color;
+                    ctx.textBaseline = "middle";
+                    var text = data.ood_score.toFixed(2),
+                        textX = Math.round((width - ctx.measureText(text).width) / 2),
+                        textY = height / 1.5;
+                    ctx.fillText(text, textX, textY);
+                    ctx.save();
+                }
+            }]
+        });
+    }
+
+    function renderProbChart(data) {
+        const ctx = document.getElementById('probChart').getContext('2d');
+        if (probChart) probChart.destroy();
+
+        probChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: data.top5_classes,
+                datasets: [{
+                    data: data.top5_probs,
+                    backgroundColor: '#4e73df',
+                    borderRadius: 4,
+                    barThickness: 20
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                scales: { x: { display: false, max: 100 }, y: { grid: { display: false } } },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+</script>
+
+</body>
+</html>
