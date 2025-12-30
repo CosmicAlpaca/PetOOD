@@ -1,4 +1,6 @@
-# PET-OOD
+# PET-OOD  
+download ngrok.exe to deploy api
+
 pip install -r requirements.txt  
 
 python app.py  
