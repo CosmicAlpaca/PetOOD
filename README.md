@@ -1,5 +1,5 @@
 # PET-OOD  
-download ngrok.exe to deploy api
+download ngrok.exe để deploy api(nếu cần chạy trên nhiều thiết bị)
 
 pip install -r requirements.txt  
 
